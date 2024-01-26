@@ -76,11 +76,14 @@ function getRelativeFilePath(file1: string, file2: string): string {
 
 function importComponentToFile(component: ComponentData, filePath: string) {
   let importStr: string;
-  if (!component.importPath) {
-    importStr = `import { ${component.componentName} } from '${getRelativeFilePath(filePath, `${projectPath}/${component.path}`)}'\n`;
-  } else {
-    importStr = `import { ${component.componentName} } from '${component.importPath}'\n`;
-  }
+  // if (!component.importPath) {
+  importStr = `import { ${component.componentName} } from '${getRelativeFilePath(
+    filePath,
+    `${projectPath}/${switchFileType(component.path, '')}`
+  )}'\n`;
+  // } else {
+  //   importStr = `import { ${component.componentName} } from '${component.importPath}'\n`;
+  // }
   const fileContents = fs.readFileSync(filePath);
   fs.writeFileSync(filePath, importStr + fileContents);
   addImportToAnnotation(component, filePath);
@@ -102,7 +105,12 @@ function switchFileType(filePath: string, newExtension: string): string {
   const fileDirectory = path.dirname(filePath);
 
   // Concatenate the new file path with the specified extension
-  const newFilePath = path.join(fileDirectory, `${fileBaseName}.${newExtension}`);
+  let newFilePath;
+  if (!newExtension) {
+    newFilePath = path.join(fileDirectory, `${fileBaseName}`);
+  } else {
+    newFilePath = path.join(fileDirectory, `${fileBaseName}.${newExtension}`);
+  }
 
   return newFilePath;
 }
@@ -122,12 +130,8 @@ function getBestPathForImport(filePath: string, pathOptions?: Map<string, RegExp
     console.error('no path options');
     return undefined;
   }
-  console.log('a');
   for (const pathAlias of pathOptions.keys()) {
     for (let pathRegex of pathOptions.get(pathAlias) ?? []) {
-      console.log(pathRegex);
-      console.log(filePath);
-      console.log(pathRegex.test(filePath));
       if (pathRegex.test(filePath)) {
         return pathAlias;
       }
