@@ -2,24 +2,24 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import { CompletionItem, CompletionItemKind, CompletionItemProvider, InlineCompletionItemProvider, Position, TextDocument } from 'vscode';
-
 import * as fs from 'fs';
 import * as path from 'path';
-import * as glob from 'glob';
 
 class ComponentData {
   path: string;
   componentName: string;
+  importPath?: string; // The path that should be used for the import.
 
-  constructor(path: string, componentName: string) {
+  constructor(path: string, componentName: string, importPath?: string) {
     this.path = path;
     this.componentName = componentName;
+    this.importPath = importPath;
   }
 }
 
 let componentSelectorToDataIndex: Map<string, ComponentData>;
+let projectPath: string;
 
-// TODO: Some typescript files are being skipped. Why?
 function getTypescriptFiles(filePath: string): string[] {
   const tsFiles: string[] = [];
 
@@ -67,6 +67,91 @@ function getTypescriptFiles(filePath: string): string[] {
   return tsFiles;
 }
 
+// function getTypescriptFiles(folderPath: string): string[] {
+//   const result: string[] = [];
+
+//   function scanDirectory(currentPath: string): void {
+//     const files = fs.readdirSync(currentPath);
+
+//     for (const file of files) {
+//       const filePath = path.join(currentPath, file);
+//       const stats = fs.statSync(filePath);
+
+//       if (stats.isDirectory()) {
+//         // Recursively scan subdirectories
+//         scanDirectory(filePath);
+//       } else if (stats.isFile() && path.extname(filePath) === '.ts') {
+//         // Check if the file has a .ts extension
+//         result.push(filePath);
+//       }
+//     }
+//   }
+
+//   scanDirectory(folderPath);
+//   return result;
+// }
+
+function getRelativeFilePath(file1: string, file2: string): string {
+  console.log(path.dirname(file1));
+  console.log(file2);
+  const relativePath = path.relative(path.dirname(file1), file2);
+  return relativePath;
+}
+
+function importComponentToFile(component: ComponentData, filePath: string) {
+  let importStr: string;
+  if (!component.importPath) {
+    importStr = `import { ${component.componentName} } from '${getRelativeFilePath(filePath, `${projectPath}/${component.path}`)}'\n`;
+  } else {
+    importStr = `import { ${component.componentName} } from '${component.importPath}'\n`;
+  }
+  const fileContents = fs.readFileSync(filePath);
+  fs.writeFileSync(filePath, importStr + fileContents);
+  addImportToAnnotation(component, filePath);
+}
+
+function addImportToAnnotation(component: ComponentData, filePath: string) {
+  const importRegex = /(@Component\({[\s\S]*imports: \[)([^}]*}\))/;
+  const fileContents = fs.readFileSync(filePath);
+  const fileWithImport = fileContents.toString().replace(importRegex, `$1${component.componentName}, $2`);
+  fs.writeFileSync(filePath, fileWithImport);
+}
+
+function switchFileType(filePath: string, newExtension: string): string {
+  // Use the built-in 'path' module to manipulate file paths
+  const path = require('path');
+
+  // Get the file's base name and directory
+  const fileBaseName = path.basename(filePath, path.extname(filePath));
+  const fileDirectory = path.dirname(filePath);
+
+  // Concatenate the new file path with the specified extension
+  const newFilePath = path.join(fileDirectory, `${fileBaseName}.${newExtension}`);
+
+  return newFilePath;
+}
+
+function importComponent(component: ComponentData) {
+  console.log(vscode.window.activeTextEditor?.document.fileName);
+  const currentFile = vscode.window.activeTextEditor?.document.fileName;
+  if (!currentFile) {
+    return;
+  }
+  const activeComponentFile = switchFileType(currentFile, 'ts');
+  importComponentToFile(component, activeComponentFile);
+}
+
+function getBestPathForImport(filePath: string, pathOptions: { [key: string]: string[] }): string {
+  for (const pathAlias of Object.keys(pathOptions)) {
+    for (const path of pathOptions[pathAlias]) {
+      if (filePath.startsWith(`src/${path}`)) {
+        return pathAlias;
+      }
+    }
+  }
+  return filePath;
+}
+
 function generateComponentSelectorToDataIndexMap(context: vscode.ExtensionContext) {
   const workspace = vscode.workspace;
 
@@ -80,6 +165,8 @@ function generateComponentSelectorToDataIndexMap(context: vscode.ExtensionContex
 
     // Get the path of the workspace folder
     const folderPath = folderUri.fsPath;
+
+    projectPath = folderPath;
 
     componentSelectorToDataIndex = checkFileContents(getTypescriptFiles(folderPath), folderPath);
   } else {
@@ -131,6 +218,8 @@ export function activate(activationContext: vscode.ExtensionContext) {
   // Register the completion item provider
   console.log('activated');
   generateComponentSelectorToDataIndexMap(activationContext);
+  vscode.commands.registerCommand('importComponent', (component: ComponentData) => importComponent(component));
+
   activationContext.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
       { scheme: 'file', language: 'html' }, // Specify the language for which the autocompletion is enabled
@@ -142,13 +231,7 @@ export function activate(activationContext: vscode.ExtensionContext) {
           context: vscode.CompletionContext
         ) {
           // console.log(componentSelectorToDataIndex);
-          // const simpleCompletion = new vscode.CompletionItem('Hello World!');
-
-          // const snippetCompletion = new vscode.CompletionItem('Good part of the day');
-          // snippetCompletion.insertText = new vscode.SnippetString('Good ${1|morning,afternoon,evening|}. It is ${1}, right?');
-          // const docs: any = new vscode.MarkdownString('Inserts a snippet that lets you select [link](x.ts).');
-          // snippetCompletion.documentation = docs;
-          // docs.baseUri = vscode.Uri.parse('http://example.com/a/b/c/');
+          // const simpleCompletion = new vscode.CompletionItem('Hello World!');`
 
           // const commitCharacterCompletion = new vscode.CompletionItem('console');
           // commitCharacterCompletion.commitCharacters = ['.'];
@@ -166,7 +249,13 @@ export function activate(activationContext: vscode.ExtensionContext) {
             for (const selector of componentSelectorToDataIndex.keys()) {
               // TODO: This logic can probably go? Vscode will handle this.
               if (selector.includes(selectorInProgress)) {
-                suggestions.push(new CompletionItem(selector));
+                const item = new CompletionItem(selector);
+                item.commitCharacters = ['>'];
+                item.documentation = `angularpls: add and import ${componentSelectorToDataIndex.get(selector)?.componentName} from ${
+                  componentSelectorToDataIndex.get(selector)?.path
+                }`;
+                item.command = { title: 'import component', command: 'importComponent', arguments: [componentSelectorToDataIndex.get(selector)] };
+                suggestions.push(item);
               }
             }
           }
