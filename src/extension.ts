@@ -67,30 +67,6 @@ function getTypescriptFiles(filePath: string): string[] {
   return tsFiles;
 }
 
-// function getTypescriptFiles(folderPath: string): string[] {
-//   const result: string[] = [];
-
-//   function scanDirectory(currentPath: string): void {
-//     const files = fs.readdirSync(currentPath);
-
-//     for (const file of files) {
-//       const filePath = path.join(currentPath, file);
-//       const stats = fs.statSync(filePath);
-
-//       if (stats.isDirectory()) {
-//         // Recursively scan subdirectories
-//         scanDirectory(filePath);
-//       } else if (stats.isFile() && path.extname(filePath) === '.ts') {
-//         // Check if the file has a .ts extension
-//         result.push(filePath);
-//       }
-//     }
-//   }
-
-//   scanDirectory(folderPath);
-//   return result;
-// }
-
 function getRelativeFilePath(file1: string, file2: string): string {
   console.log(path.dirname(file1));
   console.log(file2);
@@ -141,15 +117,23 @@ function importComponent(component: ComponentData) {
   importComponentToFile(component, activeComponentFile);
 }
 
-function getBestPathForImport(filePath: string, pathOptions: { [key: string]: string[] }): string {
-  for (const pathAlias of Object.keys(pathOptions)) {
-    for (const path of pathOptions[pathAlias]) {
-      if (filePath.startsWith(`src/${path}`)) {
+function getBestPathForImport(filePath: string, pathOptions?: Map<string, RegExp[]>): string | undefined {
+  if (!pathOptions) {
+    console.error('no path options');
+    return undefined;
+  }
+  console.log('a');
+  for (const pathAlias of pathOptions.keys()) {
+    for (let pathRegex of pathOptions.get(pathAlias) ?? []) {
+      console.log(pathRegex);
+      console.log(filePath);
+      console.log(pathRegex.test(filePath));
+      if (pathRegex.test(filePath)) {
         return pathAlias;
       }
     }
   }
-  return filePath;
+  return undefined;
 }
 
 function generateComponentSelectorToDataIndexMap(context: vscode.ExtensionContext) {
@@ -174,7 +158,7 @@ function generateComponentSelectorToDataIndexMap(context: vscode.ExtensionContex
   }
 }
 
-function checkFileContents(filePaths: string[], baseFolderPath = ''): Map<string, ComponentData> {
+function checkFileContents(filePaths: string[], baseFolderPath: string): Map<string, ComponentData> {
   const componentSelectorToDataIndex: Map<string, ComponentData> = new Map();
 
   const selectorRegex = /selector: '([^((?<!\\)\')]*)',/;
@@ -183,6 +167,22 @@ function checkFileContents(filePaths: string[], baseFolderPath = ''): Map<string
   let missingSelectorCounter = 0;
   let missingNameCounter = 0;
   let miscSkippedCounter = 0;
+  let pathMapper: Map<string, RegExp[]> | undefined = new Map();
+  try {
+    let tempPathMapper = JSON.parse(fs.readFileSync(`${baseFolderPath}/tsconfig.json`).toString()).compilerOptions.paths as {
+      [key: string]: string[];
+    };
+    for (const pathMap of Object.keys(tempPathMapper)) {
+      const indexFile = pathMap.replace('*', 'index');
+      pathMapper.set(indexFile, []);
+      tempPathMapper[pathMap].forEach((p) => {
+        pathMapper!.get(indexFile)?.push(new RegExp('^src/' + p.replaceAll('*', '.*').replaceAll('/', '\\/')));
+      });
+    }
+  } catch (e) {
+    console.error('Something went wrong while reading tsconfig, skipping this step.', e);
+    pathMapper = undefined;
+  }
   for (const filePath of filePaths) {
     try {
       const fileContents = fs.readFileSync(`${baseFolderPath}/${filePath}`, 'utf-8');
@@ -200,12 +200,13 @@ function checkFileContents(filePaths: string[], baseFolderPath = ''): Map<string
         continue;
       }
       const componentName = componentNameMatch[1];
-      componentSelectorToDataIndex.set(selector, new ComponentData(filePath, componentName));
+      componentSelectorToDataIndex.set(selector, new ComponentData(filePath, componentName, getBestPathForImport(filePath, pathMapper)));
     } catch (error: any) {
       miscSkippedCounter++;
       console.error(`Error reading file ${baseFolderPath}/${filePath}: ${error.message}`);
     }
   }
+
   console.log(`Files checked: ${filePaths.length}`);
   console.log(`Missing selectors: ${missingSelectorCounter}`);
   console.log(`Missing names: ${missingNameCounter}`);
@@ -230,13 +231,6 @@ export function activate(activationContext: vscode.ExtensionContext) {
           token: vscode.CancellationToken,
           context: vscode.CompletionContext
         ) {
-          // console.log(componentSelectorToDataIndex);
-          // const simpleCompletion = new vscode.CompletionItem('Hello World!');`
-
-          // const commitCharacterCompletion = new vscode.CompletionItem('console');
-          // commitCharacterCompletion.commitCharacters = ['.'];
-          // commitCharacterCompletion.documentation = new vscode.MarkdownString('Press `.` to get `console.`');
-
           const linePrefix = document.lineAt(position).text.slice(0, position.character);
           if (linePrefix.trim().length < 3) {
             return [];
@@ -248,6 +242,7 @@ export function activate(activationContext: vscode.ExtensionContext) {
             const selectorInProgress = match[1];
             for (const selector of componentSelectorToDataIndex.keys()) {
               // TODO: This logic can probably go? Vscode will handle this.
+              // TODO: Don't suggest components that have already been imported
               if (selector.includes(selectorInProgress)) {
                 const item = new CompletionItem(selector);
                 item.commitCharacters = ['>'];
