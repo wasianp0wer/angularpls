@@ -1,12 +1,14 @@
 # angularpls README
 
-In Angular v14 the option was added for standalone components, which would do away with modules in your project. However ALS was not updated with it. Not cool! Because of that, you would have to manually update your component with the import which is terrible. This extension fixes that problem by adding Intellisense suggestions for your components.
+In Angular v14 the option was added for standalone components, which would do away with modules in your project. However, Angular language service was not updated with it. Not cool!
+![Image: A notification from the Jeremy Renner app, with Jeremy Renner saying "@StefanHeck Nasty!! Not Cool"](https://64.media.tumblr.com/052bda3209119151101d90e323f735f8/b911ea16300852d8-c8/s540x810/b99928d11b07a979d3e6fe0cf6a6c3952635de53.jpg)
+Because of that, you would have to manually update your component with the import which is terrible. This extension fixes that problem by adding Intellisense suggestions for your components.
 
 ## Features
 
 - Auto complete your component names
 - Auto import components
-- Simplifies workflow for Angular 
+- Simplifies workflow for Angular
 
 ## Requirements
 

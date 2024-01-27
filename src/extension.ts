@@ -8,18 +8,26 @@ import * as path from 'path';
 class ComponentData {
   path: string;
   componentName: string;
-  importPath?: string; // The path that should be used for the import.
 
-  constructor(path: string, componentName: string, importPath?: string) {
+  constructor(path: string, componentName: string) {
     this.path = path;
     this.componentName = componentName;
-    this.importPath = importPath;
   }
 }
 
+// State
 let componentSelectorToDataIndex: Map<string, ComponentData>;
-let projectPath: string;
-let interval: any;
+let interval: any; // Tracks the setInterval object to prevent memory leaks.
+
+// Config
+let reindexInterval: number = 60;
+let projectPath: string | undefined;
+
+function getConfiguration() {
+  const config = vscode.workspace.getConfiguration('angularpls');
+  reindexInterval = config.get('angularpls.index.refreshInterval') ?? 60;
+  return config;
+}
 
 function getTypescriptFiles(filePath: string): string[] {
   const tsFiles: string[] = [];
@@ -77,14 +85,10 @@ function getRelativeFilePath(file1: string, file2: string): string {
 
 function importComponentToFile(component: ComponentData, filePath: string) {
   let importStr: string;
-  // if (!component.importPath) {
   importStr = `import { ${component.componentName} } from '${getRelativeFilePath(
     filePath,
     `${projectPath}/${switchFileType(component.path, '')}`
   )}'\n`;
-  // } else {
-  //   importStr = `import { ${component.componentName} } from '${component.importPath}'\n`;
-  // }
   const fileContents = fs.readFileSync(filePath);
   fs.writeFileSync(filePath, importStr + fileContents);
   addImportToAnnotation(component, filePath);
@@ -134,21 +138,6 @@ function importComponent(component: ComponentData) {
   importComponentToFile(component, activeComponentFile);
 }
 
-function getBestPathForImport(filePath: string, pathOptions?: Map<string, RegExp[]>): string | undefined {
-  if (!pathOptions) {
-    console.error('no path options');
-    return undefined;
-  }
-  for (const pathAlias of pathOptions.keys()) {
-    for (let pathRegex of pathOptions.get(pathAlias) ?? []) {
-      if (pathRegex.test(filePath)) {
-        return pathAlias;
-      }
-    }
-  }
-  return undefined;
-}
-
 function setComponentDataIndex(context: vscode.ExtensionContext) {
   if (!!componentSelectorToDataIndex && componentSelectorToDataIndex.size > 0) {
     return;
@@ -167,25 +156,33 @@ function setComponentDataIndex(context: vscode.ExtensionContext) {
 
 function generateIndex(context: vscode.ExtensionContext) {
   console.log('COMMENCING INDEXING');
-  const workspace = vscode.workspace;
-  // Check if there is a workspace and it has folders
-  if (workspace.workspaceFolders) {
-    // Access the first workspace folder
-    const firstFolder = workspace.workspaceFolders[0];
+  const folderPath = getProjectPath();
+  componentSelectorToDataIndex = checkFileContents(getTypescriptFiles(folderPath), folderPath);
+  context.workspaceState.update('componentSelectorToDataIndex', componentSelectorToDataIndex);
+}
 
-    // Get the URI (Uniform Resource Identifier) of the workspace folder
-    const folderUri = firstFolder.uri;
+function getProjectPath(): string {
+  const config = getConfiguration();
+  projectPath = config.get('angularpls.projectPath');
+  if (!projectPath) {
+    const workspace = vscode.workspace;
+    // Check if there is a workspace and it has folders
+    if (workspace.workspaceFolders) {
+      // Access the first workspace folder
+      const firstFolder = workspace.workspaceFolders[0];
 
-    // Get the path of the workspace folder
-    const folderPath = folderUri.fsPath;
+      // Get the URI (Uniform Resource Identifier) of the workspace folder
+      const folderUri = firstFolder.uri;
 
-    projectPath = folderPath;
+      // Get the path of the workspace folder
+      const folderPath = folderUri.fsPath;
 
-    componentSelectorToDataIndex = checkFileContents(getTypescriptFiles(folderPath), folderPath);
-    context.workspaceState.update('componentSelectorToDataIndex', componentSelectorToDataIndex);
-  } else {
-    console.log('No active folder found.');
+      projectPath = folderPath;
+    } else {
+      console.error('No active folder found.');
+    }
   }
+  return projectPath ?? '';
 }
 
 function checkFileContents(filePaths: string[], baseFolderPath: string): Map<string, ComponentData> {
@@ -198,22 +195,6 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
   let missingSelectorCounter = 0;
   let missingNameCounter = 0;
   let miscSkippedCounter = 0;
-  let pathMapper: Map<string, RegExp[]> | undefined = new Map();
-  try {
-    let tempPathMapper = JSON.parse(fs.readFileSync(`${baseFolderPath}/tsconfig.json`).toString()).compilerOptions.paths as {
-      [key: string]: string[];
-    };
-    for (const pathMap of Object.keys(tempPathMapper)) {
-      const indexFile = pathMap.replace('*', 'index');
-      pathMapper.set(indexFile, []);
-      tempPathMapper[pathMap].forEach((p) => {
-        pathMapper!.get(indexFile)?.push(new RegExp('^src/' + p.replaceAll('*', '.*').replaceAll('/', '\\/')));
-      });
-    }
-  } catch (e) {
-    console.error('Something went wrong while reading tsconfig, skipping this step.', e);
-    pathMapper = undefined;
-  }
   for (const filePath of filePaths) {
     try {
       const fileContents = fs.readFileSync(`${baseFolderPath}/${filePath}`, 'utf-8');
@@ -231,7 +212,7 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
         continue;
       }
       const componentName = componentNameMatch[1];
-      componentSelectorToDataIndex.set(selector, new ComponentData(filePath, componentName, getBestPathForImport(filePath, pathMapper)));
+      componentSelectorToDataIndex.set(selector, new ComponentData(filePath, componentName));
     } catch (error: any) {
       miscSkippedCounter++;
       console.error(`Error reading file ${baseFolderPath}/${filePath}: ${error.message}`);
@@ -247,26 +228,44 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
 }
 
 export function activate(activationContext: vscode.ExtensionContext) {
-  // Register the completion item provider
-  console.log('activated');
+  // Get config settings;
+  getConfiguration();
+
+  // Set the index;
   setComponentDataIndex(activationContext);
 
+  // Register interval and hooks for reindexing.
   if (!!interval) {
     clearInterval(interval);
   }
   interval = setInterval(() => {
     generateIndex(activationContext);
-  }, 60000); // Just to be safe, regenerate index every minute. It's not that expensive for some reason.
+  }, Math.floor(reindexInterval) * 1000); // Just to be safe, regenerate index every minute. It's not that expensive for some reason.
 
-  vscode.commands.registerCommand('importComponent', (component: ComponentData) => importComponent(component));
-  vscode.commands.registerCommand('reIndexComponents', () => generateIndex(activationContext));
+  const reindexCommand = vscode.commands.registerCommand('angularpls.reindex', () => {
+    try {
+      generateIndex(activationContext);
+      vscode.window.showInformationMessage('angularpls: Reindex successful.');
+    } catch {
+      vscode.window.showInformationMessage('angularpls: Something went wrong when reindexing. Some components may be missing.');
+    }
+  });
+  activationContext.subscriptions.push(reindexCommand);
 
   activationContext.subscriptions.push(
     vscode.workspace.onDidCreateFiles((event) => {
-      vscode.commands.executeCommand('reIndexComponents');
+      generateIndex(activationContext);
     })
   );
 
+  //
+
+  // Auto import logic starts here
+
+  // Register command to do component importing
+  vscode.commands.registerCommand('importComponent', (component: ComponentData) => importComponent(component));
+
+  // Register all the logic for autocomplete and importing based on that autocomplete.
   activationContext.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
       { scheme: 'file', language: 'html' }, // Specify the language for which the autocompletion is enabled
@@ -279,7 +278,7 @@ export function activate(activationContext: vscode.ExtensionContext) {
         ) {
           const linePrefix = document.lineAt(position).text.slice(0, position.character);
           const openMarkerRegex = /\<([^\s>]*)$/;
-          const suggestions: CompletionItem[] = [new CompletionItem('Hello world! :3')];
+          const suggestions: CompletionItem[] = [];
           const match = openMarkerRegex.exec(linePrefix);
           if (match && match[1]) {
             const selectorInProgress = match[1];

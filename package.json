@@ -16,8 +16,30 @@
   "contributes": {
     "commands": [
       {
-        "command": "angularpls.helloWorld",
-        "title": "Hello World"
+        "command": "angularpls.reindex",
+        "title": "Reindex Angular components",
+        "category": "angularpls"
+      }
+    ],
+    "configuration": [
+      {
+        "title": "Index refresh settings",
+        "properties": {
+          "angularpls.index.refreshInterval": {
+            "type": "number",
+            "default": 60,
+            "description": "How many seconds angularpls should wait between each reindexes."
+          }
+        }
+      },
+      {
+        "title": "Project path settings",
+        "properties": {
+          "angularpls.projectPath": {
+            "type": "string",
+            "description": "Specify a path to your Angular project. By default, the currently open folder in VsCode is used. Only needs to be set if Angular exists wrapped in a larger project, such as Electron."
+          }
+        }
       }
     ]
   },
@@ -39,8 +61,5 @@
     "@vscode/test-electron": "^2.3.8",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3"
-  },
-  "dependencies": {
-    "glob": "^10.3.10"
   }
 }
