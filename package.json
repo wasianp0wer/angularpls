@@ -19,6 +19,11 @@
         "command": "angularpls.reindex",
         "title": "Reindex Angular components",
         "category": "angularpls"
+      },
+      {
+        "command": "angularpls.manual.importComponent",
+        "title": "Import Angular component by its selector",
+        "category": "angularpls"
       }
     ],
     "configuration": [

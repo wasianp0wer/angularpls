@@ -72,28 +72,32 @@ function getTypescriptFiles(filePath: string): string[] {
       tsFiles.push(path.basename(filePath));
     }
   }
-  console.log(`Found ${tsFiles.length} component files`);
+  console.log(`Found ${tsFiles.length} component files.`);
   return tsFiles;
 }
 
 function getRelativeFilePath(file1: string, file2: string): string {
-  console.log(path.dirname(file1));
-  console.log(file2);
   const relativePath = path.relative(path.dirname(file1), file2);
   return relativePath;
 }
 
-function importComponentToFile(component: ComponentData, filePath: string) {
-  let importStr: string;
-  importStr = `import { ${component.componentName} } from '${getRelativeFilePath(
-    filePath,
-    `${projectPath}/${switchFileType(component.path, '')}`
-  )}'\n`;
-  const fileContents = fs.readFileSync(filePath);
-  fs.writeFileSync(filePath, importStr + fileContents);
-  addImportToAnnotation(component, filePath);
+function importComponentToFile(component: ComponentData, filePath: string): boolean {
+  try {
+    let importStr: string;
+    importStr = `import { ${component.componentName} } from '${getRelativeFilePath(
+      filePath,
+      `${projectPath}/${switchFileType(component.path, '')}`
+    )}'\n`;
+    const fileContents = fs.readFileSync(filePath);
+    fs.writeFileSync(filePath, importStr + fileContents);
+    addImportToAnnotation(component, filePath);
 
-  vscode.commands.executeCommand('editor.action.formatDocument', filePath);
+    vscode.commands.executeCommand('editor.action.formatDocument', filePath);
+    return true;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
 }
 
 function addImportToAnnotation(component: ComponentData, filePath: string) {
@@ -128,14 +132,22 @@ function switchFileType(filePath: string, newExtension: string): string {
   return newFilePath;
 }
 
-function importComponent(component: ComponentData) {
-  console.log(vscode.window.activeTextEditor?.document.fileName);
+function importComponent(component?: ComponentData): boolean {
+  if (!component) {
+    console.error('Component not found. Please check that the provided selector is correct, reindex, and try again.');
+    vscode.window.showInformationMessage('Component not found. Please reindex and try again.');
+    return false;
+  }
   const currentFile = vscode.window.activeTextEditor?.document.fileName;
   if (!currentFile) {
-    return;
+    return false;
   }
   const activeComponentFile = switchFileType(currentFile, 'ts');
-  importComponentToFile(component, activeComponentFile);
+  const success = importComponentToFile(component, activeComponentFile);
+  if (!success) {
+    vscode.window.showInformationMessage('Something went wrong while importing your component. Please try again.');
+  }
+  return success;
 }
 
 function setComponentDataIndex(context: vscode.ExtensionContext) {
@@ -147,7 +159,6 @@ function setComponentDataIndex(context: vscode.ExtensionContext) {
   const storedIndex = context.workspaceState.get('componentSelectorToDataIndex') as Map<string, ComponentData>;
   if (storedIndex && storedIndex.size > 0) {
     componentSelectorToDataIndex = storedIndex;
-    console.log('etst', componentSelectorToDataIndex);
   } else {
     // If we can't and still don't have the componentSelector data, generate it.
     generateIndex(context);
@@ -155,7 +166,7 @@ function setComponentDataIndex(context: vscode.ExtensionContext) {
 }
 
 function generateIndex(context: vscode.ExtensionContext) {
-  console.log('COMMENCING INDEXING');
+  console.log('INDEXING...');
   const folderPath = getProjectPath();
   componentSelectorToDataIndex = checkFileContents(getTypescriptFiles(folderPath), folderPath);
   context.workspaceState.update('componentSelectorToDataIndex', componentSelectorToDataIndex);
@@ -258,12 +269,39 @@ export function activate(activationContext: vscode.ExtensionContext) {
     })
   );
 
-  //
+  // Register quick fix
+
+  activationContext.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider({ scheme: 'file', language: 'html' }, new QuickfixImportProvider(), {
+      providedCodeActionKinds: QuickfixImportProvider.providedCodeActionKinds,
+    })
+  );
 
   // Auto import logic starts here
 
   // Register command to do component importing
-  vscode.commands.registerCommand('importComponent', (component: ComponentData) => importComponent(component));
+  const importCommand = vscode.commands.registerCommand('angularpls.importComponent', (componentSelector: string) =>
+    importComponent(componentSelectorToDataIndex.get(componentSelector))
+  );
+  activationContext.subscriptions.push(importCommand);
+
+  const manualImportCommand = vscode.commands.registerCommand('angularpls.manual.importComponent', (componentSelector: string) => {
+    vscode.window
+      .showInputBox({
+        prompt: 'Enter your argument',
+        placeHolder: 'Type here...',
+        value: '', // default value
+      })
+      .then((userInput) => {
+        const success = importComponent(componentSelectorToDataIndex.get(userInput ?? ''));
+        if (success) {
+          vscode.window.showInformationMessage('Component imported successfully.');
+        }
+        return;
+      });
+  });
+
+  activationContext.subscriptions.push(manualImportCommand);
 
   // Register all the logic for autocomplete and importing based on that autocomplete.
   activationContext.subscriptions.push(
@@ -291,7 +329,7 @@ export function activate(activationContext: vscode.ExtensionContext) {
                 item.documentation = `angularpls: add and import ${componentSelectorToDataIndex.get(selector)?.componentName} from ${
                   componentSelectorToDataIndex.get(selector)?.path
                 }`;
-                item.command = { title: 'import component', command: 'importComponent', arguments: [componentSelectorToDataIndex.get(selector)] };
+                item.command = { title: 'import component', command: 'angularpls.importComponent', arguments: [selector] };
                 suggestions.push(item);
               }
             }
@@ -306,3 +344,35 @@ export function activate(activationContext: vscode.ExtensionContext) {
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
+
+export class QuickfixImportProvider implements vscode.CodeActionProvider {
+  public static readonly providedCodeActionKinds = [vscode.CodeActionKind.QuickFix];
+  public static readonly fixesDiagnosticCode: number[] = [-998001];
+
+  provideCodeActions(
+    document: vscode.TextDocument,
+    range: vscode.Range,
+    context: vscode.CodeActionContext,
+    token: vscode.CancellationToken
+  ): vscode.ProviderResult<(vscode.Command | vscode.CodeAction)[]> {
+    for (const diagnostic of context.diagnostics) {
+      if (diagnostic.code && typeof diagnostic.code === 'number' && QuickfixImportProvider.fixesDiagnosticCode.includes(diagnostic.code)) {
+        let selector = document.getText(diagnostic.range);
+        if (selector.startsWith('<') && selector.endsWith('>')) {
+          selector = selector.slice(1, selector.length - 1);
+          if (componentSelectorToDataIndex.has(selector)) {
+            const component = componentSelectorToDataIndex.get(selector);
+            const fix = new vscode.CodeAction(
+              `angularpls: Import component ${component?.componentName} from ${component?.path}`,
+              vscode.CodeActionKind.QuickFix
+            );
+            fix.command = { title: 'import component', command: 'angularpls.importComponent', arguments: [selector] };
+            fix.diagnostics = [diagnostic];
+            return [fix];
+          }
+        }
+      }
+    }
+    return [];
+  }
+}
