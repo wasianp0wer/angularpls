@@ -193,8 +193,8 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
   const componentSelectorToDataIndex: Map<string, ComponentData> = new Map();
 
   const selectorRegex = /selector: '([^((?<!\\)\')]*)',/;
-  // TODO: Instead of including component name in the regex, we should eliminate it based on the file path name (I think???).
-  const componentNameRegex = /export class (.*Component)/;
+  // TODO: Instead of including component name in the regex, we should eliminate it based on the file path name (I think???). Wh
+  const componentNameRegex = /export class ([\S]*)/; // old regex: /export class (.*Component)/
   let missingSelectorCounter = 0;
   let missingNameCounter = 0;
   let miscSkippedCounter = 0;
@@ -278,16 +278,14 @@ export function activate(activationContext: vscode.ExtensionContext) {
           context: vscode.CompletionContext
         ) {
           const linePrefix = document.lineAt(position).text.slice(0, position.character);
-          if (linePrefix.trim().length < 3) {
-            return [];
-          }
           const openMarkerRegex = /\<([^\s>]*)$/;
           const suggestions: CompletionItem[] = [new CompletionItem('Hello world! :3')];
           const match = openMarkerRegex.exec(linePrefix);
           if (match && match[1]) {
             const selectorInProgress = match[1];
             for (const selector of componentSelectorToDataIndex.keys()) {
-              // TODO: This logic can probably go? Vscode will handle this.
+              // FIXME: (?) This logic can probably go? Vscode will handle this. However, for some reason it seems slighty more performant
+              // so I'm keeping it for now.
               if (selector.includes(selectorInProgress)) {
                 const item = new CompletionItem(selector);
                 item.commitCharacters = ['>'];
