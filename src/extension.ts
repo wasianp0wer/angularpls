@@ -19,6 +19,7 @@ class ComponentData {
 
 let componentSelectorToDataIndex: Map<string, ComponentData>;
 let projectPath: string;
+let interval: any;
 
 function getTypescriptFiles(filePath: string): string[] {
   const tsFiles: string[] = [];
@@ -48,7 +49,7 @@ function getTypescriptFiles(filePath: string): string[] {
 
       if (fs.statSync(fullPath).isDirectory()) {
         traverseDirectory(fullPath, gitIgnorePath);
-      } else if (file.endsWith('.ts')) {
+      } else if (file.endsWith('component.ts')) {
         tsFiles.push(relativePath);
       }
     });
@@ -59,11 +60,11 @@ function getTypescriptFiles(filePath: string): string[] {
     if (stats.isDirectory()) {
       const gitIgnorePath = path.join(filePath, '.gitignore');
       traverseDirectory(filePath, gitIgnorePath);
-    } else if (filePath.endsWith('.ts')) {
+    } else if (filePath.endsWith('component.ts')) {
       tsFiles.push(path.basename(filePath));
     }
   }
-  console.log(tsFiles.length);
+  console.log(`Found ${tsFiles.length} component files`);
   return tsFiles;
 }
 
@@ -87,13 +88,21 @@ function importComponentToFile(component: ComponentData, filePath: string) {
   const fileContents = fs.readFileSync(filePath);
   fs.writeFileSync(filePath, importStr + fileContents);
   addImportToAnnotation(component, filePath);
+
+  vscode.commands.executeCommand('editor.action.formatDocument', filePath);
 }
 
 function addImportToAnnotation(component: ComponentData, filePath: string) {
-  const importRegex = /(@Component\({[\s\S]*imports: \[)([^}]*}\))/;
+  const importRegex = /(@Component\({[\s\S]*imports: \[(\s*))([^}]*}\))/;
   const fileContents = fs.readFileSync(filePath);
-  const fileWithImport = fileContents.toString().replace(importRegex, `$1${component.componentName}, $2`);
-  fs.writeFileSync(filePath, fileWithImport);
+  if (importRegex.test(fileContents.toString())) {
+    const fileWithImport = fileContents.toString().replace(importRegex, `$1${component.componentName}, $2$3`);
+    fs.writeFileSync(filePath, fileWithImport);
+  } else {
+    const componentRegex = /(@Component\({(\s*))/;
+    const fileWithImport = fileContents.toString().replace(componentRegex, `$1imports: [${component.componentName}],$2`);
+    fs.writeFileSync(filePath, fileWithImport);
+  }
 }
 
 function switchFileType(filePath: string, newExtension: string): string {
@@ -140,9 +149,25 @@ function getBestPathForImport(filePath: string, pathOptions?: Map<string, RegExp
   return undefined;
 }
 
-function generateComponentSelectorToDataIndexMap(context: vscode.ExtensionContext) {
-  const workspace = vscode.workspace;
+function setComponentDataIndex(context: vscode.ExtensionContext) {
+  if (!!componentSelectorToDataIndex && componentSelectorToDataIndex.size > 0) {
+    return;
+  }
 
+  // If we don't have it already, attempt to load the index from state.
+  const storedIndex = context.workspaceState.get('componentSelectorToDataIndex') as Map<string, ComponentData>;
+  if (storedIndex && storedIndex.size > 0) {
+    componentSelectorToDataIndex = storedIndex;
+    console.log('etst', componentSelectorToDataIndex);
+  } else {
+    // If we can't and still don't have the componentSelector data, generate it.
+    generateIndex(context);
+  }
+}
+
+function generateIndex(context: vscode.ExtensionContext) {
+  console.log('COMMENCING INDEXING');
+  const workspace = vscode.workspace;
   // Check if there is a workspace and it has folders
   if (workspace.workspaceFolders) {
     // Access the first workspace folder
@@ -157,12 +182,14 @@ function generateComponentSelectorToDataIndexMap(context: vscode.ExtensionContex
     projectPath = folderPath;
 
     componentSelectorToDataIndex = checkFileContents(getTypescriptFiles(folderPath), folderPath);
+    context.workspaceState.update('componentSelectorToDataIndex', componentSelectorToDataIndex);
   } else {
     console.log('No active folder found.');
   }
 }
 
 function checkFileContents(filePaths: string[], baseFolderPath: string): Map<string, ComponentData> {
+  console.log('Checking files...');
   const componentSelectorToDataIndex: Map<string, ComponentData> = new Map();
 
   const selectorRegex = /selector: '([^((?<!\\)\')]*)',/;
@@ -222,8 +249,23 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
 export function activate(activationContext: vscode.ExtensionContext) {
   // Register the completion item provider
   console.log('activated');
-  generateComponentSelectorToDataIndexMap(activationContext);
+  setComponentDataIndex(activationContext);
+
+  if (!!interval) {
+    clearInterval(interval);
+  }
+  interval = setInterval(() => {
+    generateIndex(activationContext);
+  }, 60000); // Just to be safe, regenerate index every minute. It's not that expensive for some reason.
+
   vscode.commands.registerCommand('importComponent', (component: ComponentData) => importComponent(component));
+  vscode.commands.registerCommand('reIndexComponents', () => generateIndex(activationContext));
+
+  activationContext.subscriptions.push(
+    vscode.workspace.onDidCreateFiles((event) => {
+      vscode.commands.executeCommand('reIndexComponents');
+    })
+  );
 
   activationContext.subscriptions.push(
     vscode.languages.registerCompletionItemProvider(
@@ -246,7 +288,6 @@ export function activate(activationContext: vscode.ExtensionContext) {
             const selectorInProgress = match[1];
             for (const selector of componentSelectorToDataIndex.keys()) {
               // TODO: This logic can probably go? Vscode will handle this.
-              // TODO: Don't suggest components that have already been imported
               if (selector.includes(selectorInProgress)) {
                 const item = new CompletionItem(selector);
                 item.commitCharacters = ['>'];
