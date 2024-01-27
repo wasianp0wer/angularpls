@@ -89,10 +89,16 @@ function importComponentToFile(component: ComponentData, filePath: string): bool
       `${projectPath}/${switchFileType(component.path, '')}`
     )}'\n`;
     const fileContents = fs.readFileSync(filePath);
-    fs.writeFileSync(filePath, importStr + fileContents);
-    addImportToAnnotation(component, filePath);
+    console.log('1', fileContents);
+    let newFileContents = importStr + fileContents.toString();
+    console.log('2', newFileContents);
+    newFileContents = addImportToAnnotation(component, newFileContents);
+    console.log('3', newFileContents);
 
-    vscode.commands.executeCommand('editor.action.formatDocument', filePath);
+    fs.writeFileSync(filePath, newFileContents);
+
+    setTimeout(() => vscode.commands.executeCommand('editor.action.formatDocument', filePath), 0);
+
     return true;
   } catch (e) {
     console.error(e);
@@ -100,16 +106,21 @@ function importComponentToFile(component: ComponentData, filePath: string): bool
   }
 }
 
-function addImportToAnnotation(component: ComponentData, filePath: string) {
+function addImportToAnnotation(component: ComponentData, fileContents: string) {
   const importRegex = /(@Component\({[\s\S]*imports: \[(\s*))([^}]*}\))/;
-  const fileContents = fs.readFileSync(filePath);
   if (importRegex.test(fileContents.toString())) {
-    const fileWithImport = fileContents.toString().replace(importRegex, `$1${component.componentName}, $2$3`);
-    fs.writeFileSync(filePath, fileWithImport);
+    const isImportsEmptyRegex = /(@Component\({[\s\S]*imports: \[(\s*)\])([^}]*}\))/;
+    let fileWithImport: string;
+    if (isImportsEmptyRegex.test(fileContents)) {
+      fileWithImport = fileContents.toString().replace(importRegex, `$1${component.componentName}$2$3`);
+    } else {
+      fileWithImport = fileContents.toString().replace(importRegex, `$1${component.componentName}, $2$3`);
+    }
+    return fileWithImport;
   } else {
     const componentRegex = /(@Component\({(\s*))/;
     const fileWithImport = fileContents.toString().replace(componentRegex, `$1imports: [${component.componentName}],$2`);
-    fs.writeFileSync(filePath, fileWithImport);
+    return fileWithImport;
   }
 }
 
