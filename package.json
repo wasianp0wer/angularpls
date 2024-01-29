@@ -48,6 +48,9 @@
       }
     ]
   },
+  "repository": {
+    "url": "https://github.com/wasianp0wer/angularpls"
+  },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
