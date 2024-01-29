@@ -1,4 +1,4 @@
-# angularpls README
+# angularpls
 
 In Angular v14 the option was added for standalone components, which would do away with modules in your project. However, Angular language service was not updated with it. Not cool!
 
@@ -48,7 +48,13 @@ The project will be on the extension store soon™️. In the meantime, you can 
 
 - VsCode (as far as I'm aware) does not provide a way to hook into system generated file creation. As a result, using Angular CLI to generate a component result a short window where angularpls is not aware of your new component. It will update within 60 seconds (or whichever refresh window you have set), or you can update it manually with the reindex command.
 
+If you run into any issues, feel free to create an issue on the project's github page (https://github.com/wasianp0wer/angularpls/issues) and I'll get to it as soon as possible!
+
 ## Release Notes
+
+### 1.0.*
+
+The first release version. All features below, plus have been QA. Any minor releases are fixes to minor issues with metadata or similar.
 
 ### 0.3.0
 
