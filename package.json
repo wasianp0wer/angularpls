@@ -51,6 +51,7 @@
   "repository": {
     "url": "https://github.com/wasianp0wer/angularpls"
   },
+  "publisher": "DuckWithFourLegs",
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
