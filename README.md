@@ -32,6 +32,7 @@ The project will be on the extension store soon™️. In the meantime, you can 
 1. Run `npm install` to ensure you have all dependencies
 2. Run `vsce package` to build the package.
 3. Run `code --install-extension angularpls-{version}.vsix` to install the extension.
+4. Restart VsCode to ensure it takes effect.
 
 ## Extension Settings
 
