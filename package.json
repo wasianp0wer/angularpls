@@ -2,7 +2,7 @@
   "name": "angularpls",
   "displayName": "angularpls",
   "description": "make angular auto import components",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.85.0"
   },
