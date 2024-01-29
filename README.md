@@ -25,9 +25,13 @@ If you have any requirements or dependencies, add a section describing those and
 - ESLint
 - NPM
 
-## Running this project
+## Installing this extension.
 
-For now, I'm not putting this on the extension store bc right now it is not good enough. To run it for now, open it in VScode, run NPM install, and then press F5 to start a VSCode window with this extension running. Pls let me know if you find any bugs! - Maddie
+The project will be on the extension store soon™️. In the meantime, you can install it by following these steps:
+
+1. Run `npm install` to ensure you have all dependencies
+2. Run `vsce package` to build the package.
+3. Run `code --install-extension angularpls-{version}.vsix` to install the extension.
 
 ## Extension Settings
 
