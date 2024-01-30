@@ -44,9 +44,15 @@ If you run into any issues, feel free to create an issue on the project's github
 
 ## Release Notes
 
+*Any minor releases (x in z.y.x) are fixes to metadata or non-code issues.*
+
+### 1.1.*
+
+Fixed a bug that could occur with an unusual configuration when reindex interval was set to 0. 
+
 ### 1.0.\*
 
-The first release version. All features below, plus have been QA. Any minor releases are fixes to minor issues with metadata or similar.
+The first release version. All features below, plus have been QA. 
 
 ### 0.3.0
 

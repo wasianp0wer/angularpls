@@ -2,7 +2,7 @@
   "name": "angularpls",
   "displayName": "angularpls",
   "description": "Provide Intellisense suggestions for Angular components when running in standalone mode, and auto import selected components.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "engines": {
     "vscode": "^1.85.0"
   },
