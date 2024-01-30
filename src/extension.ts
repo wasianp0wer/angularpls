@@ -260,9 +260,11 @@ export function activate(activationContext: vscode.ExtensionContext) {
   if (!!interval) {
     clearInterval(interval);
   }
-  interval = setInterval(() => {
-    generateIndex(activationContext);
-  }, Math.floor(reindexInterval) * 1000); // Just to be safe, regenerate index every minute. It's not that expensive for some reason.
+  if (reindexInterval !== 0) {
+    interval = setInterval(() => {
+      generateIndex(activationContext);
+    }, Math.floor(reindexInterval) * 1000); // Just to be safe, regenerate index every minute. It's not that expensive for some reason.
+  }
 
   const reindexCommand = vscode.commands.registerCommand('angularpls.reindex', () => {
     try {

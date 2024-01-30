@@ -13,8 +13,6 @@ In Angular v14 the option was added for standalone components, which would do aw
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
 - Angular 14+
 - ESLint
 - NPM
@@ -46,7 +44,7 @@ If you run into any issues, feel free to create an issue on the project's github
 
 ## Release Notes
 
-### 1.0.*
+### 1.0.\*
 
 The first release version. All features below, plus have been QA. Any minor releases are fixes to minor issues with metadata or similar.
 
