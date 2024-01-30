@@ -21,7 +21,7 @@ If you have any requirements or dependencies, add a section describing those and
 
 ## Installing this extension.
 
-The project will be on the extension store soon™️. In the meantime, you can install it by following these steps:
+You can either install directly from the extension store, or clone the repository and follow these steps:
 
 1. Run `npm install` to ensure you have all dependencies
 2. Run `vsce package` to build the package.
