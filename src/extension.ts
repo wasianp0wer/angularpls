@@ -212,7 +212,6 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
   const componentSelectorToDataIndex: Map<string, ComponentData> = new Map();
 
   const selectorRegex = /selector: '([^((?<!\\)\')]*)',/;
-  // TODO: Instead of including component name in the regex, we should eliminate it based on the file path name (I think???). Wh
   const componentNameRegex = /export class ([\S]*)/; // old regex: /export class (.*Component)/
   let missingSelectorCounter = 0;
   let missingNameCounter = 0;
