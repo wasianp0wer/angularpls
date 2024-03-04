@@ -46,7 +46,7 @@ If you run into any issues, feel free to create an issue on the project's github
 
 *Any minor releases (x in z.y.x) are fixes to metadata or non-code issues.*
 
-### 1.1.*
+### 1.1.\*
 
 Fixed a bug that could occur with an unusual configuration when reindex interval was set to 0. 
 

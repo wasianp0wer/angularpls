@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { CompletionItem, CompletionItemKind, CompletionItemProvider, InlineCompletionItemProvider, Position, TextDocument } from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ComponentQuickPick } from './component-quick-pick';
 
-class ComponentData {
+export class ComponentData {
   path: string;
   componentName: string;
 
@@ -14,7 +15,7 @@ class ComponentData {
 }
 
 // State
-let componentSelectorToDataIndex: Map<string, ComponentData>;
+let componentSelectorToDataIndexByAngularRoot: Map<string, Map<string, ComponentData>>;
 let interval: any; // Tracks the setInterval object to prevent memory leaks.
 
 // Config
@@ -159,26 +160,40 @@ function importComponent(component?: ComponentData): boolean {
   return success;
 }
 
-function setComponentDataIndex(context: vscode.ExtensionContext) {
-  if (!!componentSelectorToDataIndex && componentSelectorToDataIndex.size > 0) {
-    return;
+function generateIndex(context: vscode.ExtensionContext) {
+  const start = Date.now();
+  const startTime = console.log('INDEXING...');
+  const folderPath = getProjectPath();
+  const angularProjects = findAngularProjects(folderPath);
+  const tempMap: Map<string, Map<string, ComponentData>> = new Map();
+  for (const projectPath of angularProjects) {
+    tempMap.set(projectPath, checkFileContents(getTypescriptFiles(projectPath), projectPath));
   }
-
-  // If we don't have it already, attempt to load the index from state.
-  const storedIndex = context.workspaceState.get('componentSelectorToDataIndex') as Map<string, ComponentData>;
-  if (storedIndex && storedIndex.size > 0) {
-    componentSelectorToDataIndex = storedIndex;
-  } else {
-    // If we can't and still don't have the componentSelector data, generate it.
-    generateIndex(context);
-  }
+  componentSelectorToDataIndexByAngularRoot = tempMap;
+  console.log('Time to index files:', (Date.now() - start) / 1000 + ' seconds');
 }
 
-function generateIndex(context: vscode.ExtensionContext) {
-  console.log('INDEXING...');
-  const folderPath = getProjectPath();
-  componentSelectorToDataIndex = checkFileContents(getTypescriptFiles(folderPath), folderPath);
-  context.workspaceState.update('componentSelectorToDataIndex', componentSelectorToDataIndex);
+function findAngularProjects(folderPath: string): string[] {
+  const angularProjects: string[] = [];
+
+  function searchForAngularJson(currentPath: string): void {
+    const files = fs.readdirSync(currentPath);
+
+    if (files.includes('angular.json')) {
+      angularProjects.push(currentPath);
+    }
+
+    files.forEach((file) => {
+      const filePath = path.join(currentPath, file);
+      if (fs.statSync(filePath).isDirectory()) {
+        searchForAngularJson(filePath);
+      }
+    });
+  }
+
+  searchForAngularJson(folderPath);
+
+  return angularProjects;
 }
 
 function getProjectPath(): string {
@@ -246,12 +261,40 @@ function checkFileContents(filePaths: string[], baseFolderPath: string): Map<str
   return componentSelectorToDataIndex;
 }
 
+function getMatchingSelectorsForCurrentContext(selector: string, allowPartials: boolean = false): ComponentData[] {
+  const matchingContexts: string[] = getMatchingAngularContexts();
+  const matchingComponents: ComponentData[] = [];
+  matchingContexts.map((path) => {
+    const selectors = [...(componentSelectorToDataIndexByAngularRoot.get(path)?.keys() ?? [])];
+    selectors
+      .filter((s) => (allowPartials && selector.startsWith(s)) || s === selector)
+      .forEach((s) => {
+        const component = componentSelectorToDataIndexByAngularRoot.get(path)?.get(s);
+        if (!!component) {
+          matchingComponents.push(component);
+        }
+      });
+  });
+  return matchingComponents;
+}
+
+function getMatchingAngularContexts(): string[] {
+  const currentFile = vscode.window.activeTextEditor?.document.fileName;
+  console.log('current file:', currentFile);
+  return [...componentSelectorToDataIndexByAngularRoot.keys()].filter((path) => {
+    console.log('path option:', path);
+    console.log(currentFile?.startsWith(path));
+    return currentFile?.startsWith(path);
+  });
+}
+
 export function activate(activationContext: vscode.ExtensionContext) {
+  console.log('ACTIVATING...');
   // Get config settings;
   getConfiguration();
 
   // Set the index;
-  setComponentDataIndex(activationContext);
+  generateIndex(activationContext);
 
   // Register interval and hooks for reindexing.
   if (!!interval) {
@@ -290,9 +333,8 @@ export function activate(activationContext: vscode.ExtensionContext) {
   // Auto import logic starts here
 
   // Register command to do component importing
-  const importCommand = vscode.commands.registerCommand('angularpls.importComponent', (componentSelector: string) =>
-    importComponent(componentSelectorToDataIndex.get(componentSelector))
-  );
+
+  const importCommand = vscode.commands.registerCommand('angularpls.importComponent', (component: ComponentData) => importComponent(component));
   activationContext.subscriptions.push(importCommand);
 
   const manualImportCommand = vscode.commands.registerCommand('angularpls.manual.importComponent', (componentSelector: string) => {
@@ -303,9 +345,18 @@ export function activate(activationContext: vscode.ExtensionContext) {
         value: '', // default value
       })
       .then((userInput) => {
-        const success = importComponent(componentSelectorToDataIndex.get(userInput ?? ''));
-        if (success) {
-          vscode.window.showInformationMessage('Component imported successfully.');
+        const components = getMatchingSelectorsForCurrentContext(userInput ?? '');
+        if (components.length === 0) {
+          vscode.window.showInformationMessage('Component not found.');
+        } else if (components.length === 1) {
+          const success = importComponent(components.at(0));
+          if (success) {
+            vscode.window.showInformationMessage('Component imported successfully.');
+          }
+        } else {
+          vscode.window
+            .showQuickPick<ComponentQuickPick>(components.map((c) => new ComponentQuickPick(c)))
+            .then((pick) => importComponent(pick?.data));
         }
         return;
       });
@@ -330,19 +381,21 @@ export function activate(activationContext: vscode.ExtensionContext) {
           const match = openMarkerRegex.exec(linePrefix);
           if (match && match[1]) {
             const selectorInProgress = match[1];
-            for (const selector of componentSelectorToDataIndex.keys()) {
-              // FIXME: (?) This logic can probably go? Vscode will handle this. However, for some reason it seems slighty more performant
-              // so I'm keeping it for now.
-              if (selector.includes(selectorInProgress)) {
-                const item = new CompletionItem(selector);
-                item.commitCharacters = ['>'];
-                item.documentation = `angularpls: add and import ${componentSelectorToDataIndex.get(selector)?.componentName} from ${
-                  componentSelectorToDataIndex.get(selector)?.path
-                }`;
-                item.command = { title: 'import component', command: 'angularpls.importComponent', arguments: [selector] };
-                suggestions.push(item);
+            const angularContexts = getMatchingAngularContexts();
+            angularContexts.forEach((angularContext) => {
+              for (const selector of componentSelectorToDataIndexByAngularRoot.get(angularContext)?.keys() ?? []) {
+                // FIXME: (?) This logic can probably go? Vscode will handle this. However, for some reason it seems slighty more performant
+                // so I'm keeping it for now.
+                if (selector.includes(selectorInProgress)) {
+                  const item = new CompletionItem(selector);
+                  item.commitCharacters = ['>'];
+                  const component = componentSelectorToDataIndexByAngularRoot.get(angularContext)!.get(selector)!;
+                  item.documentation = `angularpls: add and import ${component.componentName} from ${component.path}`;
+                  item.command = { title: 'import component', command: 'angularpls.importComponent', arguments: [selector] };
+                  suggestions.push(item);
+                }
               }
-            }
+            });
           }
 
           return suggestions;
@@ -369,17 +422,23 @@ export class QuickfixImportProvider implements vscode.CodeActionProvider {
       if (diagnostic.code && typeof diagnostic.code === 'number' && QuickfixImportProvider.fixesDiagnosticCode.includes(diagnostic.code)) {
         let selector = document.getText(diagnostic.range);
         if (selector.startsWith('<') && selector.endsWith('>')) {
+          const fixes: vscode.CodeAction[] = [];
+
           selector = selector.slice(1, selector.length - 1);
-          if (componentSelectorToDataIndex.has(selector)) {
-            const component = componentSelectorToDataIndex.get(selector);
-            const fix = new vscode.CodeAction(
-              `angularpls: Import component ${component?.componentName} from ${component?.path}`,
-              vscode.CodeActionKind.QuickFix
-            );
-            fix.command = { title: 'import component', command: 'angularpls.importComponent', arguments: [selector] };
-            fix.diagnostics = [diagnostic];
-            return [fix];
-          }
+          const angularContexts = getMatchingAngularContexts();
+          angularContexts.forEach((angularContext) => {
+            if (componentSelectorToDataIndexByAngularRoot.get(angularContext)!.has(selector)) {
+              const component = componentSelectorToDataIndexByAngularRoot.get(angularContext)!.get(selector);
+              const fix = new vscode.CodeAction(
+                `angularpls: Import component ${component?.componentName} from ${component?.path}`,
+                vscode.CodeActionKind.QuickFix
+              );
+              fix.command = { title: 'import component', command: 'angularpls.importComponent', arguments: [selector] };
+              fix.diagnostics = [diagnostic];
+              fixes.push(fix);
+            }
+          });
+          return fixes;
         }
       }
     }
